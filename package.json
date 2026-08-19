@@ -1,0 +1,14 @@
+{
+  "name": "feobot",
+  "version": "1.0.0",
+  "description": "Discord bot for YouTube notifications",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.6.1",
+    "rss-parser": "^3.13.0"
+  }
+}
