@@ -9,6 +9,95 @@ const databasePath = path.join(
 
 const API_KEY = process.env.YOUTUBE_API_KEY;
 
+
+/**
+ * Resolve um URL ou nome de usuário do YouTube para um Channel ID
+ * Suporta diversos formatos: @username, /c/customName, /user/username, ou ID direto
+ */
+async function resolveYouTubeChannelId(identifier) {
+    // Remove trailing slash if present
+    identifier = identifier.trim().replace(/\/+$/, "");
+
+    // Se já é um ID de canal direto (começa com UC e tem 24 caracteres)
+    if (/^UC[A-Z0-9_-]{22}$/.test(identifier)) {
+        return identifier;
+    }
+
+    try {
+        // Tentar diferentes abordagens para resolver o ID do canal
+
+        // 1. Tentar como @handle (para URLs como youtube.com/@username)
+        if (identifier.includes('@') || identifier.startsWith('@')) {
+            const handle = identifier.startsWith('@') ? identifier.substring(1) : identifier.split('/').pop();
+            const response = await axios.get(
+                "https://www.googleapis.com/youtube/v3/channels",
+                {
+                    params: {
+                        key: API_KEY,
+                        forHandle: `@${handle}`,
+                        part: "id"
+                    }
+                }
+            );
+
+            if (response.data.items && response.data.items.length > 0) {
+                return response.data.items[0].id;
+            }
+        }
+
+        // 2. Tentar buscar por nome de usuário (para /user/ ou nome simples)
+        // Primeiro, extrair o possível nome de usuário
+        let username = identifier;
+        if (identifier.includes('/')) {
+            const parts = identifier.split('/');
+            // Pegar a última parte que não estiver vazia
+            for (let i = parts.length - 1; i >= 0; i--) {
+                if (parts[i]) {
+                    username = parts[i];
+                    break;
+                }
+            }
+        }
+
+        // Remover prefixos conhecidos
+        username = username.replace(/^@/, '').replace(/^c\//, '').replace(/^user\//, '');
+
+        if (username) {
+            const response = await axios.get(
+                "https://www.googleapis.com/youtube/v3/channels",
+                {
+                    params: {
+                        key: API_KEY,
+                        forHandle: `@${username}`, // Tentar como handle primeiro
+                        part: "id"
+                    }
+                }
+            );
+
+            if (response.data.items && response.data.items.length > 0) {
+                return response.data.items[0].id;
+            }
+
+            // Se não encontrou como handle, tentar como username
+            const response2 = await axios.get(
+                "https://www.googleapis.com/youtube/v3/channels",
+                {
+                    params: {
+                        key: API_KEY,
+                        forUsername: username,
+                        part: "id"
+                    }
+                }
+            );
+        }
+    } catch (error) {
+        console.error(`Erro ao resolver canal do YouTube ${identifier}:`, error.message);
+    }
+
+    // Se não conseguiu resolver, retornar o identificador original (vai falhar depois)
+    return identifier;
+}
+
 function loadDatabase() {
     if (!fs.existsSync(databasePath)) {
         fs.writeFileSync(databasePath, "{}");
@@ -98,8 +187,29 @@ async function checkGuild(
 ) {
 
     try {
+        // Resolver o YouTube Channel ID se necessário
+        let youtubeChannelId = config.youtubeChannelId;
 
-        if (!config.youtubeChannelId) {
+        // Validar se o ID armazenado parece ser um ID de canal do YouTube válido
+        const isValidYoutubeId = youtubeChannelId && /^UC[A-Z0-9_-]{22}$/.test(youtubeChannelId);
+
+        // Se não temos um ID válido mas temos a URL salva, resolver
+        if (!isValidYoutubeId && config.youtubeChannelUrl) {
+            console.log(
+                `🔍 Resolvendo URL do YouTube para ${guildId}: ${config.youtubeChannelUrl}`
+            );
+            youtubeChannelId = await resolveYouTubeChannelId(config.youtubeChannelUrl);
+
+            // Salvar o ID resolvido para uso futuro
+            config.youtubeChannelId = youtubeChannelId;
+            saveDatabase(database);
+
+            console.log(
+                `✅ Canal do YouTube resolvido: ${youtubeChannelId}`
+            );
+        }
+
+        if (!youtubeChannelId) {
 
             console.log(
                 `❌ Nenhum Channel ID configurado para ${guildId}`
@@ -116,7 +226,7 @@ async function checkGuild(
 
             config.youtubeUploadsPlaylistId =
                 await getUploadsPlaylistId(
-                    config.youtubeChannelId
+                    youtubeChannelId
                 );
 
             saveDatabase(database);
